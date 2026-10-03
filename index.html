@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <!-- Viewport estricto para evitar zoom y scroll accidental -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>ColorADD Kids</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+    }
+
+    /* 100dvh se adapta exacto al área visible real del móvil */
+    html, body {
+      width: 100%;
+      height: 100dvh;
+      overflow: hidden;
+      position: fixed;
+      top: 0;
+      left: 0;
+      background-color: #000000;
+      color: #ffffff;
+      touch-action: none; /* Bloquea gestos de arrastrar la página */
+    }
+
+    .app-container {
+      width: 100%;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      position: relative;
+    }
+
+    /* ÁREA DE CÁMARA (Ocupa todo el fondo) */
+    .camera-wrapper {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+      background: #111;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    /* Mira central */
+    .target-crosshair {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 70px;
+      height: 70px;
+      border: 3px solid rgba(255, 255, 255, 0.9);
+      border-radius: 50%;
+      z-index: 10;
+      pointer-events: none;
+      box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.25);
+    }
+
+    .target-dot {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 8px;
+      height: 8px;
+      background-color: #ffffff;
+      border-radius: 50%;
+    }
+
+    /* CABECERA (Superpuesta arriba) */
+    header {
+      position: relative;
+      z-index: 10;
+      padding: 16px;
+      text-align: center;
+      background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent);
+    }
+
+    h1 {
+      font-size: 1.3rem;
+      color: #4fc3f7;
+      letter-spacing: 0.5px;
+    }
+
+    /* TARJETA INFERIOR (Superpuesta abajo) */
+    .bottom-panel {
+      position: relative;
+      z-index: 10;
+      padding: 16px;
+      padding-bottom: calc(16px + env(safe-area-inset-bottom));
+      background: linear-gradient(to top, rgba(0,0,0,0.95), rgba(0,0,0,0.4), transparent);
+    }
+
+    .card {
+      background: #ffffff;
+      color: #000000;
+      border-radius: 20px;
+      padding: 14px 18px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+    }
+
+    .symbol-container {
+      width: 64px;
+      height: 64px;
+      background-color: #000000;
+      border-radius: 14px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    canvas#symbolCanvas {
+      width: 48px;
+      height: 48px;
+    }
+
+    .info {
+      flex-grow: 1;
+    }
+
+    .info .label {
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: #777;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .info .color-name {
+      font-size: 1.6rem;
+      font-weight: 900;
+      margin-top: 1px;
+    }
+
+    .btn-speak {
+      background: #007aff;
+      border: none;
+      border-radius: 50%;
+      width: 50px;
+      height: 50px;
+      color: white;
+      font-size: 1.3rem;
+      cursor: pointer;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      box-shadow: 0 4px 12px rgba(0,122,255,0.4);
+    }
+
+    .btn-speak:active {
+      transform: scale(0.92);
+    }
+
+    canvas#hiddenBuffer {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="app-container">
+    <!-- Vista previa de la cámara -->
+    <div class="camera-wrapper">
+      <video id="video" autoplay playsinline muted></video>
+      <div class="target-crosshair">
+        <div class="target-dot"></div>
+      </div>
+    </div>
+
+    <!-- Título superior -->
+    <header>
+      <h1>ColorADD Kids</h1>
+    </header>
+
+    <!-- Panel inferior compacto sin scroll -->
+    <div class="bottom-panel">
+      <div class="card" onclick="speakColor()">
+        <div class="symbol-container">
+          <canvas id="symbolCanvas" width="96" height="96"></canvas>
+        </div>
+        <div class="info">
+          <div class="label">Color Detectado</div>
+          <div id="colorName" class="color-name">Buscando...</div>
+        </div>
+        <button class="btn-speak" onclick="event.stopPropagation(); speakColor();" title="Escuchar">🔊</button>
+      </div>
+    </div>
+  </div>
+
+  <canvas id="hiddenBuffer" width="1" height="1"></canvas>
+
+  <script>
+    let currentColorName = "";
+    const video = document.getElementById('video');
+    const bufferCanvas = document.getElementById('hiddenBuffer');
+    const bufferCtx = bufferCanvas.getContext('2d', { willReadFrequently: true });
+
+    // Bloquear cualquier intento de scroll táctil en el móvil
+    document.addEventListener('touchmove', function(e) {
+      e.preventDefault();
+    }, { passive: false });
+
+    async function initCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { exact: "environment" },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        });
+        video.srcObject = stream;
+      } catch (err) {
+        try {
+          const fallbackStream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false
+          });
+          video.srcObject = fallbackStream;
+        } catch (e) {
+          document.getElementById('colorName').innerText = "Sin Cámara";
+        }
+      }
+    }
+
+    function processCenterPixel() {
+      if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        const vWidth = video.videoWidth;
+        const vHeight = video.videoHeight;
+
+        bufferCanvas.width = vWidth;
+        bufferCanvas.height = vHeight;
+
+        bufferCtx.drawImage(video, 0, 0, vWidth, vHeight);
+
+        const centerX = Math.floor(vWidth / 2);
+        const centerY = Math.floor(vHeight / 2);
+
+        const pixelData = bufferCtx.getImageData(centerX - 2, centerY - 2, 5, 5).data;
+
+        let r = 0, g = 0, b = 0;
+        const count = pixelData.length / 4;
+
+        for (let i = 0; i < pixelData.length; i += 4) {
+          r += pixelData[i];
+          g += pixelData[i + 1];
+          b += pixelData[i + 2];
+        }
+
+        r = Math.round(r / count);
+        g = Math.round(g / count);
+        b = Math.round(b / count);
+
+        const result = convertRgbToColorAdd(r, g, b);
+
+        if (result.name !== currentColorName) {
+          currentColorName = result.name;
+          document.getElementById('colorName').innerText = result.name;
+          drawSymbol(result.type);
+        }
+      }
+      requestAnimationFrame(processCenterPixel);
+    }
+
+    function convertRgbToColorAdd(r, g, b) {
+      const rNorm = r / 255, gNorm = g / 255, bNorm = b / 255;
+      const max = Math.max(rNorm, gNorm, bNorm), min = Math.min(rNorm, gNorm, bNorm);
+      let h, s, l = (max + min) / 2;
+
+      if (max === min) {
+        h = s = 0;
+      } else {
+        const d = max - min;
+        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+        switch (max) {
+          case rNorm: h = (gNorm - bNorm) / d + (gNorm < bNorm ? 6 : 0); break;
+          case gNorm: h = (bNorm - rNorm) / d + 2; break;
+          case bNorm: h = (rNorm - gNorm) / d + 4; break;
+        }
+        h /= 6;
+      }
+
+      const hue = h * 360;
+
+      if (l < 0.15) return { name: "Negro", type: "black" };
+      if (l > 0.85 && s < 0.25) return { name: "Blanco", type: "white" };
+      if (s < 0.18) return { name: "Gris", type: "gray" };
+
+      if (hue >= 345 || hue < 15) return { name: "Rojo", type: "red" };
+      if (hue >= 15 && hue < 45) return { name: "Naranja", type: "orange" };
+      if (hue >= 45 && hue < 70) return { name: "Amarillo", type: "yellow" };
+      if (hue >= 70 && hue < 165) return { name: "Verde", type: "green" };
+      if (hue >= 165 && hue < 255) return { name: "Azul", type: "blue" };
+      if (hue >= 255 && hue < 310) return { name: "Púrpura", type: "purple" };
+      if (hue >= 310 && hue < 345) return { name: "Rosa", type: "red" };
+
+      return { name: "Gris", type: "gray" };
+    }
+
+    function drawSymbol(type) {
+      const canvas = document.getElementById('symbolCanvas');
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width;
+      const h = canvas.height;
+
+      ctx.clearRect(0, 0, w, h);
+      ctx.strokeStyle = "#FFFFFF";
+      ctx.fillStyle = "#FFFFFF";
+      ctx.lineWidth = 8;
+      ctx.lineCap = "round";
+
+      switch (type) {
+        case "red":
+          ctx.beginPath();
+          ctx.moveTo(w * 0.2, h * 0.2);
+          ctx.lineTo(w * 0.8, h * 0.8);
+          ctx.stroke();
+          break;
+        case "yellow":
+          ctx.beginPath();
+          ctx.moveTo(w * 0.8, h * 0.2);
+          ctx.lineTo(w * 0.2, h * 0.8);
+          ctx.stroke();
+          break;
+        case "blue":
+          ctx.beginPath();
+          ctx.moveTo(w * 0.2, h * 0.3);
+          ctx.lineTo(w * 0.8, h * 0.3);
+          ctx.lineTo(w * 0.5, h * 0.8);
+          ctx.closePath();
+          ctx.fill();
+          break;
+        case "green":
+          ctx.beginPath();
+          ctx.moveTo(w * 0.5, h * 0.2);
+          ctx.lineTo(w * 0.8, h * 0.7);
+          ctx.lineTo(w * 0.2, h * 0.7);
+          ctx.closePath();
+          ctx.fill();
+          break;
+        case "orange":
+          ctx.beginPath();
+          ctx.moveTo(w * 0.7, h * 0.2);
+          ctx.lineTo(w * 0.3, h * 0.5);
+          ctx.lineTo(w * 0.7, h * 0.8);
+          ctx.stroke();
+          break;
+        case "purple":
+          ctx.beginPath();
+          ctx.moveTo(w * 0.3, h * 0.2);
+          ctx.lineTo(w * 0.7, h * 0.5);
+          ctx.lineTo(w * 0.3, h * 0.8);
+          ctx.stroke();
+          break;
+        case "white":
+          ctx.strokeRect(w * 0.2, h * 0.2, w * 0.6, h * 0.6);
+          break;
+        case "black":
+          ctx.fillRect(w * 0.2, h * 0.2, w * 0.6, h * 0.6);
+          break;
+        case "gray":
+          ctx.lineWidth = 5;
+          ctx.strokeRect(w * 0.25, h * 0.25, w * 0.5, h * 0.5);
+          ctx.fillRect(w * 0.4, h * 0.4, w * 0.2, h * 0.2);
+          break;
+      }
+    }
+
+    function speakColor() {
+      if ('speechSynthesis' in window && currentColorName) {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(currentColorName);
+        utterance.lang = 'es-ES';
+        utterance.rate = 0.9;
+        window.speechSynthesis.speak(utterance);
+      }
+    }
+
+    window.onload = () => {
+      initCamera();
+      processCenterPixel();
+    };
+  </script>
+</body>
+</html>
